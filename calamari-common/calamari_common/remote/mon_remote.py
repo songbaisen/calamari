@@ -15,6 +15,7 @@ import os
 import msgpack
 import json
 import tempfile
+import psutil
 
 import logging
 log = logging.getLogger('calamari.remote.mon')
@@ -263,7 +264,8 @@ def transform_crushmap(data, operation):
     returns (0 on success, transformed crushmap, errors)
     """
     # write data to a tempfile because crushtool can't handle stdin :(
-    with tempfile.NamedTemporaryFile(delete=True) as f:
+    with tempfile.NamedTemporaryFile() as f:
+        log.error("GREGORY {0}".format(f.name))
         f.write(data)
         f.flush()
 
@@ -274,7 +276,7 @@ def transform_crushmap(data, operation):
         else:
             return 1, '', 'Did not specify get or set'
 
-        p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
         stdout, stderr = p.communicate()
         return p.returncode, stdout, stderr
 
@@ -355,11 +357,21 @@ def ceph_command(cluster_name, command_args):
         args = ceph + command_args
 
     log.info('ceph_command {0}'.format(str(args)))
-    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    me = psutil.Process()
+    kids = psutil.Process().children(recursive=True)
+    log.error("GREGORY - ceph_command - {0} has {1} children".format(me.name(), len(kids)))
+    for c in kids:
+        log.error("GREGORY - ceph_command - {0} has {1} FDs open".format(c.name(), c.num_fds()))
+    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
     stdout, stderr = p.communicate()
     status = p.returncode
     p.stdout.close()
     p.stderr.close()
+    try:
+        p.kill()
+        log.error("GREGORY KILL- ceph_command")
+    except OSError:
+        pass
 
     log.info('ceph_command {0} {1} {2}'.format(str(status), stdout, stderr))
     return {
@@ -385,11 +397,17 @@ def rbd_command(command_args, pool_name=None):
         args = ["rbd"] + command_args
 
     log.info('rbd_command {0}'.format(str(args)))
-    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    log.error("GREGORY - rbd_command")
+    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
     stdout, stderr = p.communicate()
     status = p.returncode
     p.stdout.close()
     p.stderr.close()
+    try:
+        p.kill()
+        log.error("GREGORY KILL- rbd_command")
+    except OSError:
+        pass
     log.info('rbd_command {0} {1} {2}'.format(str(status), stdout, stderr))
 
     return {
